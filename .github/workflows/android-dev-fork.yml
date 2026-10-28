@@ -1,6 +1,9 @@
 name: Android Debug APK (Fork)
 
 on:
+  push:
+    branches: ['codex/android-debug-build']
+    paths: ['.github/workflows/android-dev-fork.yml']
   workflow_dispatch:
     inputs:
       source_branch:
@@ -8,11 +11,6 @@ on:
         required: true
         default: 'codex/android-debug-build'
         type: string
-      use_repository_secrets:
-        description: 'Use optional repository secrets for Firebase / Infura / WalletConnect'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -38,14 +36,13 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_branch }}
+          ref: ${{ inputs.source_branch || github.ref }}
           fetch-depth: 1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24.22.1'
-          cache: yarn
 
       - name: Set up Java
         uses: actions/setup-java@v4
