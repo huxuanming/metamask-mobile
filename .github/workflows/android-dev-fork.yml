@@ -1,0 +1,158 @@
+name: Android Debug APK (Fork)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Branch or ref to build'
+        required: true
+        default: 'codex/android-debug-build'
+        type: string
+      use_repository_secrets:
+        description: 'Use optional repository secrets for Firebase / Infura / WalletConnect'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  METAMASK_BUILD_TYPE: main
+  METAMASK_ENVIRONMENT: dev
+  CONFIGURATION: Debug
+  SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+  CI: 'true'
+  # Safe development fallback. Add real values as repository secrets when needed.
+  MM_INFURA_PROJECT_ID: ${{ secrets.MM_INFURA_PROJECT_ID || 'null' }}
+  WALLET_CONNECT_PROJECT_ID: ${{ secrets.WALLET_CONNECT_PROJECT_ID || '' }}
+  MM_FOX_CODE: ${{ secrets.MM_FOX_CODE || 'EXAMPLE_FOX_CODE' }}
+
+jobs:
+  build-android:
+    name: Build MetaMask Android debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_branch }}
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: yarn
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install \
+            'platform-tools' \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;27.1.12297006' \
+            'cmake;3.22.1'
+
+      - name: Enable Yarn 4
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare yarn@4.14.1 --activate
+          node --version
+          yarn --version
+
+      - name: Install JavaScript dependencies
+        run: yarn install --immutable
+
+      - name: Prepare MetaMask build dependencies
+        env:
+          METAMASK_BUILD_TYPE: main
+        run: yarn setup:github-ci
+
+      - name: Configure optional development environment
+        env:
+          GOOGLE_SERVICES_B64_ANDROID: ${{ secrets.GOOGLE_SERVICES_B64_ANDROID }}
+          MM_INFURA_PROJECT_ID: ${{ secrets.MM_INFURA_PROJECT_ID || 'null' }}
+          WALLET_CONNECT_PROJECT_ID: ${{ secrets.WALLET_CONNECT_PROJECT_ID || '' }}
+          MM_FOX_CODE: ${{ secrets.MM_FOX_CODE || 'EXAMPLE_FOX_CODE' }}
+        shell: bash
+        run: |
+          # Keep credentials out of the repository. If no Firebase secret is configured,
+          # use the repository's non-production example config so the debug APK can build.
+          if [ -n "$GOOGLE_SERVICES_B64_ANDROID" ]; then
+            printf '%s' "$GOOGLE_SERVICES_B64_ANDROID" | base64 --decode > android/app/google-services.json
+          else
+            cp android/app/google-services-example.json android/app/google-services.json
+          fi
+
+          cat > .js.env <<EOF_ENV
+          export MM_INFURA_PROJECT_ID="$MM_INFURA_PROJECT_ID"
+          export WALLET_CONNECT_PROJECT_ID="$WALLET_CONNECT_PROJECT_ID"
+          export MM_FOX_CODE="$MM_FOX_CODE"
+          export METAMASK_BUILD_TYPE="main"
+          export METAMASK_ENVIRONMENT="dev"
+          export SENTRY_DISABLE_AUTO_UPLOAD="true"
+          export GOOGLE_SERVICES_B64_ANDROID="$(base64 -w 0 android/app/google-services.json)"
+          EOF_ENV
+
+      - name: Use the standard Android debug keystore
+        shell: bash
+        run: |
+          # The upstream dev flavor points at MetaMask's private signer. For a fork,
+          # use the standard Android debug key so the APK is installable locally.
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/build.gradle')
+          text = path.read_text()
+          old = 'signingConfig signingConfigs.mainDev'
+          new = 'signingConfig signingConfigs.debug'
+          if old not in text:
+              raise SystemExit('Expected mainDev signing config was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          test -f android/keystores/debug.keystore
+
+      - name: Build Android debug APK
+        run: ./scripts/build.sh android main dev
+        env:
+          METAMASK_BUILD_TYPE: main
+          METAMASK_ENVIRONMENT: dev
+          CONFIGURATION: Debug
+          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+          NODE_OPTIONS: --max-old-space-size=8192
+          METRO_MAX_WORKERS: '2'
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: metamask-android-debug-fork
+          path: |
+            android/app/build/outputs/apk/prod/debug/app-prod-debug.apk
+            android/app/build/outputs/apk/androidTest/prod/debug/app-prod-debug-androidTest.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metamask-android-debug-fork-diagnostics
+          path: |
+            android/app/build/outputs/logs/**
+            android/app/build/reports/**
+          if-no-files-found: ignore
+          retention-days: 7
