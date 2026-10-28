@@ -1,4 +1,4 @@
-name: Android Debug APK (Fork)
+name: Android Standalone Test APK (Fork)
 
 on:
   push:
@@ -18,17 +18,17 @@ permissions:
 env:
   METAMASK_BUILD_TYPE: main
   METAMASK_ENVIRONMENT: dev
-  CONFIGURATION: Debug
+  CONFIGURATION: Release
   SENTRY_DISABLE_AUTO_UPLOAD: 'true'
   CI: 'true'
-  # Safe development fallback. Add real values as repository secrets when needed.
-  MM_INFURA_PROJECT_ID: ${{ secrets.MM_INFURA_PROJECT_ID || 'null' }}
-  WALLET_CONNECT_PROJECT_ID: ${{ secrets.WALLET_CONNECT_PROJECT_ID || '' }}
-  MM_FOX_CODE: ${{ secrets.MM_FOX_CODE || 'EXAMPLE_FOX_CODE' }}
+  # Public test build: do not embed credentials in public artifacts.
+  MM_INFURA_PROJECT_ID: 'null'
+  WALLET_CONNECT_PROJECT_ID: ''
+  MM_FOX_CODE: 'EXAMPLE_FOX_CODE'
 
 jobs:
   build-android:
-    name: Build MetaMask Android debug APK
+    name: Build MetaMask Android standalone test APK
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -80,12 +80,12 @@ jobs:
           METAMASK_BUILD_TYPE: main
         run: yarn setup:github-ci
 
-      - name: Configure optional development environment
+      - name: Configure test environment
         env:
-          GOOGLE_SERVICES_B64_ANDROID: ${{ secrets.GOOGLE_SERVICES_B64_ANDROID }}
-          MM_INFURA_PROJECT_ID: ${{ secrets.MM_INFURA_PROJECT_ID || 'null' }}
-          WALLET_CONNECT_PROJECT_ID: ${{ secrets.WALLET_CONNECT_PROJECT_ID || '' }}
-          MM_FOX_CODE: ${{ secrets.MM_FOX_CODE || 'EXAMPLE_FOX_CODE' }}
+          GOOGLE_SERVICES_B64_ANDROID: ''
+          MM_INFURA_PROJECT_ID: 'null'
+          WALLET_CONNECT_PROJECT_ID: ''
+          MM_FOX_CODE: 'EXAMPLE_FOX_CODE'
         shell: bash
         run: |
           # Keep credentials out of the repository. If no Firebase secret is configured,
@@ -123,12 +123,12 @@ jobs:
           PY
           test -f android/keystores/debug.keystore
 
-      - name: Build Android debug APK
+      - name: Build Android standalone test APK
         run: ./scripts/build.sh android main dev
         env:
           METAMASK_BUILD_TYPE: main
           METAMASK_ENVIRONMENT: dev
-          CONFIGURATION: Debug
+          CONFIGURATION: Release
           SENTRY_DISABLE_AUTO_UPLOAD: 'true'
           NODE_OPTIONS: --max-old-space-size=8192
           METRO_MAX_WORKERS: '2'
@@ -136,10 +136,9 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: metamask-android-debug-fork
+          name: metamask-android-standalone-fork
           path: |
-            android/app/build/outputs/apk/prod/debug/app-prod-debug.apk
-            android/app/build/outputs/apk/androidTest/prod/debug/app-prod-debug-androidTest.apk
+            android/app/build/outputs/apk/prod/release/app-prod-release.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -147,7 +146,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: metamask-android-debug-fork-diagnostics
+          name: metamask-android-standalone-fork-diagnostics
           path: |
             android/app/build/outputs/logs/**
             android/app/build/reports/**
